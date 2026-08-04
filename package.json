@@ -1,0 +1,26 @@
+{
+  "name": "chatgpt-local-workspace",
+  "version": "2.1.0",
+  "main": "server.js",
+  "scripts": {
+    "check": "node --check server.js && node --check src/config.js && node --check src/httpServer.js && node --check src/mcpServer.js && node --check src/tools/files.js && node --check src/tools/git.js && node --check src/tools/patch.js && node --check src/tools/scripts.js && node --check src/tools/workspaces.js && node --check src/utils/command.js && node --check src/utils/diff.js && node --check src/utils/paths.js && node --check src/utils/result.js && node --check src/utils/writeGuard.js",
+    "test": "npm run check && node --test",
+    "build": "npm run check",
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:start": "npm --prefix web run start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "type": "module"
+ 
+}
