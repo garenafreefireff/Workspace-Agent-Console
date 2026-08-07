@@ -1,17 +1,14 @@
 import { z } from "zod";
 import {
-  DEFAULT_WORKSPACE,
-  WORKSPACE_NAMES,
+  assertWorkspacePermission,
   getWorkspace,
-} from "../config.js";
+} from "../services/workspaceRegistry.js";
 import { execFile } from "../utils/command.js";
 import { applyUnifiedDiff } from "../utils/diff.js";
 import { limitOutput, textResult } from "../utils/result.js";
 import { assertWriteEnabled } from "../utils/writeGuard.js";
 
-const workspaceSchema = z
-  .enum(WORKSPACE_NAMES)
-  .default(DEFAULT_WORKSPACE);
+const workspaceSchema = z.string().min(1).optional();
 
 export function registerPatchTools(server) {
   server.registerTool(
@@ -32,7 +29,7 @@ export function registerPatchTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       patch,
     }) => {
       console.log("[TOOL] workspace_apply_patch", {
@@ -44,6 +41,7 @@ export function registerPatchTools(server) {
         assertWriteEnabled();
 
         const selected = getWorkspace(workspace);
+        assertWorkspacePermission(selected, "write");
         await applyUnifiedDiff(selected.root, patch);
 
         let status =

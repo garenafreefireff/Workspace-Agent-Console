@@ -6,8 +6,11 @@ import {
   COMMAND_TIMEOUT_MS,
   SAFE_COMMAND_PREFIXES,
   SAFE_RUNNERS,
-  getWorkspace,
 } from "../config.js";
+import {
+  assertWorkspacePermission,
+  getWorkspace,
+} from "../services/workspaceRegistry.js";
 import {
   resolveExistingPath,
   toWorkspaceRelative,
@@ -52,6 +55,7 @@ async function findMatchingCommandPrefix(
   args
 ) {
   const selected = getWorkspace(workspace);
+  assertWorkspacePermission(selected, "execute");
   const workingDirectory = await resolveExistingPath(
     selected.root,
     cwd
@@ -59,7 +63,7 @@ async function findMatchingCommandPrefix(
   const normalizedCommand = normalizeCommandName(command);
 
   for (const rule of SAFE_COMMAND_PREFIXES) {
-    if (rule.workspace !== selected.name) {
+    if (rule.workspace !== selected.id) {
       continue;
     }
 
@@ -105,6 +109,7 @@ export async function runAllowedCommand(runnerName) {
   }
 
   const selected = getWorkspace(runner.workspace);
+  assertWorkspacePermission(selected, "execute");
   const workingDirectory = await resolveExistingPath(
     selected.root,
     runner.cwd

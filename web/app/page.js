@@ -5,6 +5,7 @@ import styles from "./page.module.css";
 
 const TABS = [
   "overview",
+  "workspaces",
   "files",
   "git",
   "write",
@@ -75,6 +76,7 @@ function Icon({ name }) {
     tools: "M4 7h16M4 12h16M4 17h16",
     list: "M5 6h14M5 12h14M5 18h14",
     terminal: "M5 7l5 5-5 5M12 17h7",
+    folder: "M3 6h7l2 2h9v10H3z",
   };
 
   return (
@@ -100,6 +102,65 @@ function pretty(value) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function tabIcon(tabName) {
+  return {
+    overview: "list",
+    workspaces: "folder",
+    files: "file",
+    git: "git",
+    write: "play",
+    tools: "tools",
+  }[tabName] ?? "tools";
+}
+
+function normalizeWorkspaceItems(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const seenIds = new Set();
+  const normalized = [];
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const rawId = item.id ?? item.name;
+
+    if (typeof rawId !== "string" || !rawId.trim()) {
+      continue;
+    }
+
+    const id = rawId.trim();
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    normalized.push({
+      id,
+      name:
+        typeof item.name === "string" && item.name.trim()
+          ? item.name.trim()
+          : id,
+      root: typeof item.root === "string" ? item.root : "",
+      default: item.default === true,
+      enabled: item.enabled !== false,
+      permissions: {
+        read: item.permissions?.read !== false,
+        write: item.permissions?.write === true,
+        git: item.permissions?.git !== false,
+        commit: item.permissions?.commit === true,
+        execute: item.permissions?.execute === true,
+      },
+    });
+  }
+
+  return normalized;
 }
 
 function firstText(result) {
@@ -159,6 +220,8 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState("");
   const [busy, setBusy] = useState(false);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState("");
   const [outputTitle, setOutputTitle] = useState("Ready");
   const [output, setOutput] = useState("Open the dashboard and run a tool.");
@@ -186,13 +249,26 @@ export default function Page() {
   const [moveDestination, setMoveDestination] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmMove, setConfirmMove] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState("");
+  const [workspaceInspection, setWorkspaceInspection] = useState(null);
 
-  const tools = boot?.tools ?? [];
-  const toolMap = useMemo(
-    () => new Map(tools.map((tool) => [tool.name, tool])),
-    [tools]
+  const tools = useMemo(
+    () =>
+      Array.isArray(boot?.tools)
+        ? boot.tools.filter(
+            (tool) =>
+              tool && typeof tool.name === "string" && tool.name
+          )
+        : [],
+    [boot?.tools]
   );
-  const workspaces = boot?.health?.workspaces ?? [];
+  const workspaces = useMemo(
+    () => normalizeWorkspaceItems(boot?.health?.workspaces),
+    [boot?.health?.workspaces]
+  );
 
   useEffect(() => {
     loadBootstrap();
@@ -200,6 +276,8 @@ export default function Page() {
 
   async function loadBootstrap() {
     setLoading(true);
+    setWorkspaceBusy(false);
+    setPickerBusy(false);
     setError("");
 
     try {
@@ -212,11 +290,32 @@ export default function Page() {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
+      const normalizedWorkspaces = normalizeWorkspaceItems(
+        data.health?.workspaces
+      );
+      const requestedDefault =
+        typeof data.health?.defaultWorkspace === "string"
+          ? data.health.defaultWorkspace
+          : "";
+      const fallbackWorkspace =
+        normalizedWorkspaces.find((item) => item.default)?.id ??
+        normalizedWorkspaces[0]?.id ??
+        "";
+      const resolvedDefault = normalizedWorkspaces.some(
+        (item) => item.id === requestedDefault
+      )
+        ? requestedDefault
+        : fallbackWorkspace;
+
       setBoot(data);
-      setWorkspace(data.health?.defaultWorkspace ?? "ems");
+      setWorkspace((current) =>
+        normalizedWorkspaces.some((item) => item.id === current)
+          ? current
+          : resolvedDefault
+      );
       setOutputTitle("Bootstrap loaded");
       setOutput(
-        `Backend: ${data.health?.serverVersion ?? "unknown"}\nTools: ${data.tools.length}`
+        `Backend: ${data.health?.serverVersion ?? "unknown"}\nTools: ${Array.isArray(data.tools) ? data.tools.length : 0}`
       );
     } catch (err) {
       setError(err.message);
@@ -268,6 +367,229 @@ export default function Page() {
     return parsed && typeof parsed === "object" ? parsed : {};
   }
 
+  function resetWorkspaceEditor() {
+    setWorkspaceBusy(false);
+    setPickerBusy(false);
+    setWorkspaceId("");
+    setWorkspaceName("");
+    setWorkspaceRoot("");
+    setEditingWorkspaceId("");
+    setWorkspaceInspection(null);
+  }
+
+  function editWorkspace(item) {
+    const id = typeof item?.id === "string" ? item.id : "";
+
+    if (!id) {
+      setError("Workspace khong co ID hop le. Hay restart backend.");
+      return;
+    }
+
+    setWorkspaceId(id);
+    setWorkspaceName(
+      typeof item.name === "string" ? item.name : id
+    );
+    setWorkspaceRoot(
+      typeof item.root === "string" ? item.root : ""
+    );
+    setEditingWorkspaceId(id);
+    setWorkspaceInspection(null);
+    setTab("workspaces");
+  }
+
+  async function requestJson(url, options = {}) {
+    const response = await fetch(url, {
+      cache: "no-store",
+      ...options,
+      headers: {
+        "content-type": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+
+    return data;
+  }
+
+  async function validateWorkspacePath() {
+    if (!workspaceRoot.trim()) {
+      setError("Nhap duong dan workspace truoc.");
+      return;
+    }
+
+    setWorkspaceBusy(true);
+    setAction("Validate workspace");
+    setError("");
+
+    try {
+      const data = await requestJson("/api/workspaces/validate", {
+        method: "POST",
+        body: JSON.stringify({ root: workspaceRoot }),
+      });
+      const inspection = data.inspection ?? {};
+      setWorkspaceRoot(
+        typeof inspection.root === "string" ? inspection.root : workspaceRoot
+      );
+      setWorkspaceInspection(inspection);
+      setOutputTitle("Workspace path valid");
+      setOutput(JSON.stringify(data.inspection, null, 2));
+    } catch (err) {
+      setError(err.message);
+      setOutputTitle("Workspace path invalid");
+      setOutput(err.message);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
+
+  async function pickWorkspaceDirectory() {
+    if (pickerBusy) {
+      return;
+    }
+
+    setPickerBusy(true);
+    setAction("Open folder picker");
+    setError("");
+
+    try {
+      const data = await requestJson("/api/workspaces/pick", {
+        method: "POST",
+        body: "{}",
+      });
+
+      const selection = data.selection ?? {};
+
+      if (selection.cancelled) {
+        setOutputTitle("Folder picker cancelled");
+        setOutput("Khong co thu muc nao duoc chon.");
+        return;
+      }
+
+      if (typeof selection.root !== "string" || !selection.root) {
+        throw new Error("Folder picker khong tra ve duong dan hop le.");
+      }
+
+      setWorkspaceRoot(selection.root);
+      setWorkspaceInspection(selection);
+      setOutputTitle("Folder selected");
+      setOutput(JSON.stringify(selection, null, 2));
+    } catch (err) {
+      setError(err.message);
+      setOutputTitle("Folder picker error");
+      setOutput(err.message);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function saveWorkspace() {
+    if (
+      !workspaceId.trim() ||
+      !workspaceName.trim() ||
+      !workspaceRoot.trim()
+    ) {
+      setError("Can nhap day du ID, ten va duong dan workspace.");
+      return;
+    }
+
+    setWorkspaceBusy(true);
+    setAction(editingWorkspaceId ? "Update workspace" : "Add workspace");
+    setError("");
+
+    try {
+      const editing = Boolean(editingWorkspaceId);
+      const data = await requestJson(
+        editing
+          ? `/api/workspaces/${encodeURIComponent(editingWorkspaceId)}`
+          : "/api/workspaces",
+        {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify({
+            id: workspaceId.trim(),
+            name: workspaceName.trim(),
+            root: workspaceRoot.trim(),
+          }),
+        }
+      );
+      const selectedId = editingWorkspaceId || workspaceId.trim();
+      await loadBootstrap();
+      setWorkspace(selectedId);
+      setOutputTitle(editing ? "Workspace updated" : "Workspace added");
+      setOutput(JSON.stringify(data.result, null, 2));
+      resetWorkspaceEditor();
+    } catch (err) {
+      setError(err.message);
+      setOutputTitle("Workspace save error");
+      setOutput(err.message);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
+
+  async function removeWorkspace(id) {
+    if (typeof id !== "string" || !id.trim()) {
+      setError("Khong the xoa workspace vi thieu ID hop le.");
+      return;
+    }
+
+    if (!window.confirm(`Xoa workspace ${id} khoi danh sach?`)) {
+      return;
+    }
+
+    setWorkspaceBusy(true);
+    setAction("Remove workspace");
+    setError("");
+
+    try {
+      const data = await requestJson(
+        `/api/workspaces/${encodeURIComponent(id)}`,
+        { method: "DELETE" }
+      );
+      await loadBootstrap();
+      resetWorkspaceEditor();
+      setOutputTitle("Workspace removed");
+      setOutput(JSON.stringify(data.result, null, 2));
+    } catch (err) {
+      setError(err.message);
+      setOutputTitle("Workspace remove error");
+      setOutput(err.message);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
+
+  async function setDefaultWorkspace(id) {
+    if (typeof id !== "string" || !id.trim()) {
+      setError("Khong the dat workspace mac dinh vi thieu ID hop le.");
+      return;
+    }
+
+    setWorkspaceBusy(true);
+    setAction("Set default workspace");
+    setError("");
+
+    try {
+      const data = await requestJson(
+        `/api/workspaces/${encodeURIComponent(id)}/default`,
+        { method: "POST", body: "{}" }
+      );
+      await loadBootstrap();
+      setWorkspace(id);
+      setOutputTitle("Default workspace updated");
+      setOutput(JSON.stringify(data.result, null, 2));
+    } catch (err) {
+      setError(err.message);
+      setOutputTitle("Default workspace error");
+      setOutput(err.message);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
+
   return (
     <main className={styles.shell}>
       <div className={styles.frame}>
@@ -289,10 +611,10 @@ export default function Page() {
             <p className={styles.sectionTitle}>Workspace summary</p>
             <div className={styles.workspaceList}>
               {workspaces.map((item) => (
-                <div key={item.name} className={styles.workspaceRow}>
+                <div key={item.id} className={styles.workspaceRow}>
                   <div>
                     <div className={styles.workspaceName}>
-                      {item.name}
+                      {item.name} ({item.id})
                       {item.default ? " (default)" : ""}
                     </div>
                     <div className={styles.workspacePath}>
@@ -351,19 +673,7 @@ export default function Page() {
                   }`}
                   onClick={() => setTab(item)}
                 >
-                  <Icon
-                    name={
-                      item === "overview"
-                        ? "list"
-                        : item === "files"
-                          ? "file"
-                          : item === "git"
-                            ? "git"
-                            : item === "write"
-                              ? "play"
-                              : "tools"
-                    }
-                  />
+                  <Icon name={tabIcon(item)} />
                   {item}
                 </button>
               ))}
@@ -488,6 +798,198 @@ export default function Page() {
             </div>
           ) : null}
 
+          {tab === "workspaces" ? (
+            <div className={`${styles.grid} ${styles.gridTwo}`}>
+              <Panel
+                title={
+                  editingWorkspaceId
+                    ? `Edit workspace: ${editingWorkspaceId}`
+                    : "Add workspace"
+                }
+                note="Workspace moi mac dinh chi doc, khong duoc ghi file, commit hay chay command."
+              >
+                <div className={styles.fieldGrid}>
+                  <Field
+                    label="Workspace ID"
+                    hint="Chu thuong, so, gach ngang hoac gach duoi."
+                  >
+                    <input
+                      className={styles.fieldInput}
+                      value={workspaceId}
+                      disabled={Boolean(editingWorkspaceId)}
+                      placeholder="my-project"
+                      onChange={(event) =>
+                        setWorkspaceId(event.target.value.toLowerCase())
+                      }
+                    />
+                  </Field>
+                  <Field label="Display name">
+                    <input
+                      className={styles.fieldInput}
+                      value={workspaceName}
+                      placeholder="My Project"
+                      onChange={(event) =>
+                        setWorkspaceName(event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Absolute folder path">
+                    <div className={styles.pathPickerRow}>
+                      <input
+                        className={styles.fieldInput}
+                        value={workspaceRoot}
+                        placeholder="E:\\projects\\my-project"
+                        onChange={(event) => {
+                          setWorkspaceRoot(event.target.value);
+                          setWorkspaceInspection(null);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className={styles.ghostButton}
+                        onClick={pickWorkspaceDirectory}
+                        disabled={pickerBusy}
+                      >
+                        <Icon name="folder" />
+                        {pickerBusy ? "Opening..." : "Choose folder"}
+                      </button>
+                    </div>
+                  </Field>
+
+                  {workspaceInspection ? (
+                    <div className={styles.inspectionBox}>
+                      <div className={styles.inlineRow}>
+                        <span className={`${styles.badge} ${styles.badgeStrong}`}>
+                          Valid directory
+                        </span>
+                        <span className={styles.badge}>
+                          Git: {workspaceInspection.isGitRepository ? "yes" : "no"}
+                        </span>
+                      </div>
+                      <div className={styles.workspacePath}>
+                        {workspaceInspection.root}
+                      </div>
+                      <div className={styles.inlineRow}>
+                        {(workspaceInspection.markers ?? []).map(
+                          (marker, index) => (
+                            <span
+                              key={`${String(marker)}-${index}`}
+                              className={styles.badge}
+                            >
+                              {String(marker)}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className={styles.inlineRow}>
+                    <button
+                      type="button"
+                      className={styles.ghostButton}
+                      onClick={validateWorkspacePath}
+                      disabled={workspaceBusy || !workspaceRoot.trim()}
+                    >
+                      Validate path
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      onClick={saveWorkspace}
+                      disabled={workspaceBusy}
+                    >
+                      {editingWorkspaceId ? "Save changes" : "Add workspace"}
+                    </button>
+                    {editingWorkspaceId ? (
+                      <button
+                        type="button"
+                        className={styles.ghostButton}
+                        onClick={resetWorkspaceEditor}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </Panel>
+
+              <Panel
+                title="Registered workspaces"
+                note="Changes are available to MCP tools immediately; no backend restart is required."
+                actions={
+                  <span className={styles.badge}>
+                    {workspaces.length} workspaces
+                  </span>
+                }
+              >
+                <div className={styles.workspaceManagerList}>
+                  {workspaces.map((item) => (
+                    <article key={item.id} className={styles.workspaceCard}>
+                      <div className={styles.workspaceCardHeader}>
+                        <div>
+                          <div className={styles.workspaceName}>
+                            {item.name} ({item.id})
+                          </div>
+                          <div className={styles.workspacePath}>{item.root}</div>
+                        </div>
+                        {item.default ? (
+                          <span className={`${styles.badge} ${styles.badgeStrong}`}>
+                            Default
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className={styles.inlineRow}>
+                        <span className={styles.badge}>Read</span>
+                        {item.permissions?.write ? (
+                          <span className={styles.badge}>Write</span>
+                        ) : (
+                          <span className={styles.badge}>Read-only</span>
+                        )}
+                        {item.permissions?.git ? (
+                          <span className={styles.badge}>Git inspect</span>
+                        ) : null}
+                        {item.permissions?.commit ? (
+                          <span className={styles.badge}>Commit</span>
+                        ) : null}
+                        {item.permissions?.execute ? (
+                          <span className={styles.badge}>Execute</span>
+                        ) : null}
+                      </div>
+
+                      <div className={styles.inlineRow}>
+                        <button
+                          type="button"
+                          className={styles.ghostButton}
+                          onClick={() => setDefaultWorkspace(item.id)}
+                          disabled={workspaceBusy || item.default}
+                        >
+                          Set default
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.ghostButton}
+                          onClick={() => editWorkspace(item)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.dangerButton}
+                          onClick={() => removeWorkspace(item.id)}
+                          disabled={workspaceBusy || workspaces.length <= 1}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+          ) : null}
+
           {tab === "files" ? (
             <div className={`${styles.grid} ${styles.gridTwo}`}>
               <Panel
@@ -502,8 +1004,8 @@ export default function Page() {
                       onChange={(e) => setWorkspace(e.target.value)}
                     >
                       {workspaces.map((item) => (
-                        <option key={item.name} value={item.name}>
-                          {item.name}
+                        <option key={item.id} value={item.id}>
+                          {item.name} ({item.id})
                         </option>
                       ))}
                     </select>
@@ -726,8 +1228,8 @@ export default function Page() {
                       onChange={(e) => setWorkspace(e.target.value)}
                     >
                       {workspaces.map((item) => (
-                        <option key={item.name} value={item.name}>
-                          {item.name}
+                        <option key={item.id} value={item.id}>
+                          {item.name} ({item.id})
                         </option>
                       ))}
                     </select>
@@ -1136,7 +1638,11 @@ export default function Page() {
           <div className={styles.resultPanel}>
             <div className={styles.resultMeta}>
               <span>{outputTitle}</span>
-              <span>{busy ? `Running ${action}...` : "Idle"}</span>
+              <span>
+                {busy || workspaceBusy || pickerBusy
+                  ? `Running ${action}...`
+                  : "Idle"}
+              </span>
             </div>
             <pre className={styles.resultText}>{output}</pre>
           </div>

@@ -1,0 +1,31 @@
+{
+  "defaultWorkspace": "ems",
+  "workspaces": {
+    "bess": {
+      "id": "bess",
+      "name": "BESS Planner",
+      "root": "E:\\bessplaner",
+      "enabled": true,
+      "permissions": {
+        "read": true,
+        "write": true,
+        "git": true,
+        "commit": true,
+        "execute": true
+      }
+    },
+    "ems": {
+      "id": "ems",
+      "name": "EMS DRL",
+      "root": "E:\\img\\bess2\\EMS_DRL_Package_2026-07-11\\EMS_DRL_Package",
+      "enabled": true,
+      "permissions": {
+        "read": true,
+        "write": true,
+        "git": true,
+        "commit": true,
+        "execute": true
+      }
+    }
+  }
+}

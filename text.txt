@@ -1,1 +1,2 @@
 ub ,mongdb ,fastapi, strucre , jwt, docker-compese.yml , module 
+cloudflared tunnel --url http://localhost:6677

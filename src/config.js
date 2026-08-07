@@ -1,45 +1,4 @@
-import path from "node:path";
-
-export const WORKSPACES = Object.freeze({
-  bess: path.resolve(
-    process.env.WORKSPACE_BESS ?? "E:\\bessplaner"
-  ),
-  ems: path.resolve(
-    process.env.WORKSPACE_EMS ??
-      "E:\\img\\bess2\\EMS_DRL_Package_2026-07-11\\EMS_DRL_Package"
-  ),
-});
-
-export const WORKSPACE_NAMES = Object.freeze(
-  Object.keys(WORKSPACES)
-);
-
-const configuredDefault =
-  process.env.DEFAULT_WORKSPACE ?? "ems";
-
-export const DEFAULT_WORKSPACE = WORKSPACES[configuredDefault]
-  ? configuredDefault
-  : "ems";
-
-export function getWorkspace(
-  workspaceName = DEFAULT_WORKSPACE
-) {
-  const root = WORKSPACES[workspaceName];
-
-  if (!root) {
-    throw new Error(
-      `Workspace khong hop le: ${workspaceName}. ` +
-        `Cac workspace duoc phep: ${WORKSPACE_NAMES.join(", ")}`
-    );
-  }
-
-  return {
-    name: workspaceName,
-    root,
-  };
-}
-
-export const SERVER_VERSION = "2.1.0";
+export const SERVER_VERSION = "2.2.0";
 
 export const PORT = Number(process.env.PORT ?? 8787);
 export const HOST = process.env.HOST ?? "127.0.0.1";
@@ -97,28 +56,28 @@ export const SAFE_RUNNERS = {
   bess_frontend_lint: {
     title: "BESS frontend lint",
     workspace: "bess",
-    cwd: "frontend",
+    cwd: "web",
     command: NPM_COMMAND,
     args: ["run", "lint"],
   },
   bess_frontend_typecheck: {
     title: "BESS frontend typecheck",
     workspace: "bess",
-    cwd: "frontend",
+    cwd: "web",
     command: NPM_COMMAND,
     args: ["run", "typecheck"],
   },
   bess_frontend_test: {
     title: "BESS frontend tests",
     workspace: "bess",
-    cwd: "frontend",
+    cwd: "web",
     command: NPM_COMMAND,
     args: ["test"],
   },
   bess_frontend_build: {
     title: "BESS frontend build",
     workspace: "bess",
-    cwd: "frontend",
+    cwd: "web",
     command: NPM_COMMAND,
     args: ["run", "build"],
   },
@@ -142,14 +101,14 @@ export const SAFE_COMMAND_PREFIXES = Object.freeze([
   {
     title: "BESS npm run",
     workspace: "bess",
-    cwdChoices: [".", "frontend"],
+    cwdChoices: [".", "web"],
     command: NPM_COMMAND,
     argsPrefix: ["run"],
   },
   {
     title: "BESS npm test",
     workspace: "bess",
-    cwdChoices: [".", "frontend"],
+    cwdChoices: [".", "web"],
     command: NPM_COMMAND,
     argsPrefix: ["test"],
   },

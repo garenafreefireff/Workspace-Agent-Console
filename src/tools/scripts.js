@@ -1,9 +1,7 @@
 import { z } from "zod";
 import {
-  DEFAULT_WORKSPACE,
   SAFE_COMMAND_PREFIXES,
   SAFE_RUNNERS,
-  WORKSPACE_NAMES,
 } from "../config.js";
 import {
   runAllowedCommand,
@@ -16,9 +14,7 @@ export const RUNNER_NAMES = Object.freeze(
   Object.keys(SAFE_RUNNERS)
 );
 
-const workspaceSchema = z
-  .enum(WORKSPACE_NAMES)
-  .default(DEFAULT_WORKSPACE);
+const workspaceSchema = z.string().min(1).optional();
 
 export function registerScriptTools(server) {
   server.registerTool(
@@ -132,7 +128,7 @@ export function registerScriptTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       cwd = ".",
       command,
       args = [],

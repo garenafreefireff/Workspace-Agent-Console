@@ -125,7 +125,8 @@
 
 .tabButton,
 .actionButton,
-.ghostButton {
+.ghostButton,
+.dangerButton {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   padding: 9px 12px;
@@ -142,7 +143,8 @@
 
 .tabButton:hover,
 .actionButton:hover,
-.ghostButton:hover {
+.ghostButton:hover,
+.dangerButton:hover {
   border-color: var(--accent);
 }
 
@@ -164,6 +166,55 @@
 
 .ghostButton {
   background: #fff;
+}
+
+.dangerButton {
+  background: #fff5f5;
+  color: #a12626;
+  border-color: #efb5b5;
+}
+
+.dangerButton:hover {
+  background: #ffe8e8;
+  border-color: #d56a6a;
+}
+
+.pathPickerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.inspectionBox {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #b9ddd8;
+  border-radius: 8px;
+  background: #f0fbf9;
+}
+
+.workspaceManagerList {
+  display: grid;
+  gap: 10px;
+  max-height: 560px;
+  overflow: auto;
+}
+
+.workspaceCard {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.workspaceCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .grid {
@@ -309,7 +360,12 @@
 
 @media (max-width: 820px) {
   .gridTwo,
-  .gridThree {
+  .gridThree,
+  .pathPickerRow {
     grid-template-columns: 1fr;
+  }
+
+  .workspaceCardHeader {
+    flex-direction: column;
   }
 }

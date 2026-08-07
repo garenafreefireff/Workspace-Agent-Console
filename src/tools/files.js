@@ -2,10 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import {
-  DEFAULT_WORKSPACE,
-  WORKSPACE_NAMES,
+  assertWorkspacePermission,
   getWorkspace,
-} from "../config.js";
+} from "../services/workspaceRegistry.js";
 import { textResult } from "../utils/result.js";
 import {
   collectTextFiles,
@@ -16,9 +15,13 @@ import {
 } from "../utils/paths.js";
 import { assertWriteEnabled } from "../utils/writeGuard.js";
 
-const workspaceSchema = z
-  .enum(WORKSPACE_NAMES)
-  .default(DEFAULT_WORKSPACE);
+const workspaceSchema = z.string().min(1).optional();
+
+function selectWorkspace(workspaceName, permission) {
+  const selected = getWorkspace(workspaceName);
+  assertWorkspacePermission(selected, permission);
+  return selected;
+}
 
 function lineCount(value) {
   if (!value) {
@@ -60,7 +63,7 @@ export function registerFileTools(server) {
     {
       title: "List workspace files",
       description:
-        "Inspect files and directories in one permitted workspace. Choose workspace 'bess' or 'ems'.",
+        "Inspect files and directories in any dynamically registered workspace.",
       inputSchema: {
         workspace: workspaceSchema,
         directory: z.string().default("."),
@@ -73,12 +76,12 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       directory = ".",
       depth = 3,
     }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "read");
         const absoluteDirectory = await resolveExistingPath(
           selected.root,
           directory
@@ -141,12 +144,12 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       file,
       maxCharacters = 50000,
     }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "read");
         const absoluteFile = await resolveExistingPath(
           selected.root,
           file
@@ -207,14 +210,14 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       files,
       maxCharactersPerFile = 25000,
     }) => {
       const sections = [];
 
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "read");
 
         for (const file of files) {
           try {
@@ -293,13 +296,13 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       query,
       directory = ".",
       caseSensitive = false,
     }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "read");
         const absoluteDirectory = await resolveExistingPath(
           selected.root,
           directory
@@ -400,12 +403,12 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       directory = ".",
       maxFiles = 250,
     }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "read");
         const absoluteDirectory = await resolveExistingPath(
           selected.root,
           directory
@@ -504,7 +507,7 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       file,
       oldText,
       newText,
@@ -516,7 +519,7 @@ export function registerFileTools(server) {
           throw new Error("Noi dung cu va moi giong nhau.");
         }
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "write");
         const absoluteFile = await resolveExistingPath(
           selected.root,
           file
@@ -605,7 +608,7 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       file,
       content,
       overwrite = true,
@@ -614,7 +617,7 @@ export function registerFileTools(server) {
       try {
         assertWriteEnabled();
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "write");
         let absoluteFile;
         let previousContent = "";
         let existed = false;
@@ -706,7 +709,7 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       file,
       confirm = false,
     }) => {
@@ -719,7 +722,7 @@ export function registerFileTools(server) {
           );
         }
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "write");
         const absoluteFile = await resolveExistingPath(
           selected.root,
           file
@@ -765,7 +768,7 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       source,
       destination,
       overwrite = false,
@@ -784,7 +787,7 @@ export function registerFileTools(server) {
           throw new Error("Source va destination giong nhau.");
         }
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "write");
         const absoluteSource = await resolveExistingPath(
           selected.root,
           source
@@ -860,14 +863,14 @@ export function registerFileTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       file,
       content,
     }) => {
       try {
         assertWriteEnabled();
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "write");
         const absoluteFile = await resolveWritableFile(
           selected.root,
           file

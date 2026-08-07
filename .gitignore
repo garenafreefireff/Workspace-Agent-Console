@@ -12,8 +12,10 @@ dist/
 build/
 **/dist/
 
-# Logs
+# Logs and local workspace registry
 *.log
+data/workspaces.json
+data/*.tmp
 backend.err.log
 backend.out.log
 web.err.log

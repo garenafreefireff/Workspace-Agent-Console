@@ -28,7 +28,7 @@ test("health endpoint responds with workspace metadata", async () => {
 
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    assert.equal(body.schemaMode, "multi-workspace");
+    assert.equal(body.schemaMode, "dynamic-multi-workspace");
     assert.ok(Array.isArray(body.workspaces));
   } finally {
     await close(server);
@@ -56,6 +56,12 @@ test("MCP server registers core and extended tools", async () => {
     for (const expected of [
       "workspace_read_many_files",
       "workspace_repo_map",
+      "workspace_validate_path",
+      "workspace_add",
+      "workspace_update",
+      "workspace_remove",
+      "workspace_set_default",
+      "workspace_pick_directory",
       "workspace_write_file",
       "workspace_delete_file",
       "workspace_move_file",
@@ -70,7 +76,7 @@ test("MCP server registers core and extended tools", async () => {
       );
     }
 
-    assert.ok(toolNames.length >= 20);
+    assert.ok(toolNames.length >= 27);
   } finally {
     await client.close();
     await close(server);

@@ -1,9 +1,8 @@
 import { z } from "zod";
 import {
-  DEFAULT_WORKSPACE,
-  WORKSPACE_NAMES,
+  assertWorkspacePermission,
   getWorkspace,
-} from "../config.js";
+} from "../services/workspaceRegistry.js";
 import { execFile } from "../utils/command.js";
 import {
   resolveWorkspacePath,
@@ -12,9 +11,13 @@ import {
 import { limitOutput, textResult } from "../utils/result.js";
 import { assertWriteEnabled } from "../utils/writeGuard.js";
 
-const workspaceSchema = z
-  .enum(WORKSPACE_NAMES)
-  .default(DEFAULT_WORKSPACE);
+const workspaceSchema = z.string().min(1).optional();
+
+function selectWorkspace(workspaceName, permission) {
+  const selected = getWorkspace(workspaceName);
+  assertWorkspacePermission(selected, permission);
+  return selected;
+}
 
 function validateGitRef(ref) {
   if (!/^[A-Za-z0-9._/@:^~+-]+$/.test(ref) || ref.startsWith("-")) {
@@ -39,9 +42,9 @@ export function registerGitTools(server) {
         openWorldHint: false,
       },
     },
-    async ({ workspace = DEFAULT_WORKSPACE, file }) => {
+    async ({ workspace, file }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "git");
         const args = ["-C", selected.root, "diff", "--"];
 
         if (file) {
@@ -94,13 +97,13 @@ export function registerGitTools(server) {
         openWorldHint: false,
       },
     },
-    async ({ workspace = DEFAULT_WORKSPACE }) => {
+    async ({ workspace }) => {
       console.log("[TOOL] workspace_git_status", {
         workspace,
       });
 
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "git");
         const { stdout, stderr } = await execFile(
           "git",
           [
@@ -161,12 +164,12 @@ export function registerGitTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       maxCount = 20,
       file,
     }) => {
       try {
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "git");
         const args = [
           "-C",
           selected.root,
@@ -231,14 +234,14 @@ export function registerGitTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       ref = "HEAD",
       maxCharacters = 80000,
     }) => {
       try {
         validateGitRef(ref);
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "git");
         const { stdout, stderr } = await execFile(
           "git",
           [
@@ -300,7 +303,7 @@ export function registerGitTools(server) {
       },
     },
     async ({
-      workspace = DEFAULT_WORKSPACE,
+      workspace,
       message,
       files = [],
       all = false,
@@ -314,7 +317,7 @@ export function registerGitTools(server) {
           );
         }
 
-        const selected = getWorkspace(workspace);
+        const selected = selectWorkspace(workspace, "commit");
 
         if (all) {
           await execFile(
