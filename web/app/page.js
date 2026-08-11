@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 
 const TABS = [
@@ -11,6 +11,59 @@ const TABS = [
   "write",
   "tools",
 ];
+
+const WORKSPACE_PERMISSION_PRESETS = Object.freeze({
+  read_only: Object.freeze({
+    read: true,
+    write: false,
+    git: true,
+    commit: false,
+    execute: false,
+  }),
+  full: Object.freeze({
+    read: true,
+    write: true,
+    git: true,
+    commit: true,
+    execute: true,
+  }),
+});
+
+const WORKSPACE_PERMISSION_KEYS = Object.freeze([
+  ["read", "Read", "Read and inspect files"],
+  ["write", "Write", "Create, update, move and delete files"],
+  ["git", "Git inspect", "Status, diff, log and show"],
+  ["commit", "Commit", "Stage changes and create Git commits"],
+  ["execute", "Execute", "Run only commands allowed by the safe command allowlist"],
+]);
+
+function clonePermissions(permissions) {
+  return {
+    read: permissions?.read !== false,
+    write: permissions?.write === true,
+    git: permissions?.git !== false,
+    commit: permissions?.commit === true,
+    execute: permissions?.execute === true,
+  };
+}
+
+function permissionsEqual(left, right) {
+  return WORKSPACE_PERMISSION_KEYS.every(
+    ([key]) => Boolean(left?.[key]) === Boolean(right?.[key])
+  );
+}
+
+function permissionModeFor(permissions) {
+  if (permissionsEqual(permissions, WORKSPACE_PERMISSION_PRESETS.read_only)) {
+    return "read_only";
+  }
+
+  if (permissionsEqual(permissions, WORKSPACE_PERMISSION_PRESETS.full)) {
+    return "full";
+  }
+
+  return "custom";
+}
 
 const TOOL_PRESETS = {
   workspace_server_info: {},
@@ -101,7 +154,8 @@ function pretty(value) {
     return value;
   }
 
-  return JSON.stringify(value, null, 2);
+  const serialized = JSON.stringify(value, null, 2);
+  return serialized === undefined ? String(value) : serialized;
 }
 
 function tabIcon(tabName) {
@@ -214,17 +268,251 @@ function Panel({ title, note, children, actions }) {
   );
 }
 
+const MAX_ACTIVITY_ENTRIES = 60;
+const MAX_ACTIVITY_TEXT = 18000;
+const MAX_ACTIVITY_STORED_TEXT = 24000;
+
+function compactActivityValue(value) {
+  const text = pretty(value);
+
+  if (text.length <= MAX_ACTIVITY_STORED_TEXT) {
+    return value;
+  }
+
+  return `${text.slice(0, MAX_ACTIVITY_STORED_TEXT)}\n\n[Payload truncated before storing in Activity Terminal]`;
+}
+
+function truncateActivityText(value) {
+  const text = typeof value === "string" ? value : pretty(value);
+
+  if (text.length <= MAX_ACTIVITY_TEXT) {
+    return text;
+  }
+
+  return `${text.slice(0, MAX_ACTIVITY_TEXT)}\n\n[Output truncated in Activity Terminal]`;
+}
+
+function activityTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString("vi-VN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function activityStatusLabel(status) {
+  return {
+    running: "CALLING",
+    success: "SUCCESS",
+    warning: "WARNING",
+    error: "ERROR",
+    cancelled: "CANCELLED",
+  }[status] ?? String(status).toUpperCase();
+}
+
+function activityToText(activity, showArguments = true, showRaw = false) {
+  const lines = [
+    `[${activityTime(activity.timestamp)}] ${activityStatusLabel(activity.status)}`,
+    activity.name,
+    `Source: ${activity.source ?? "unknown"}`,
+  ];
+
+  if (typeof activity.durationMs === "number") {
+    lines.push(`Duration: ${activity.durationMs} ms`);
+  }
+
+  if (showArguments && activity.args !== undefined) {
+    lines.push("", "Arguments:", truncateActivityText(activity.args));
+  }
+
+  if (activity.error) {
+    lines.push("", "Error:", activity.error);
+  } else if (activity.result !== undefined) {
+    lines.push(
+      "",
+      "Result:",
+      truncateActivityText(
+        showRaw && activity.rawResponse !== undefined
+          ? activity.rawResponse
+          : activity.result
+      )
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function ActivityTerminal({
+  activities,
+  autoScroll,
+  setAutoScroll,
+  showArguments,
+  setShowArguments,
+  showRaw,
+  setShowRaw,
+  onClear,
+}) {
+  const scrollRef = useRef(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!autoScroll || !scrollRef.current) {
+      return;
+    }
+
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [activities, autoScroll]);
+
+  async function copyActivities() {
+    const text = activities
+      .map((activity) => activityToText(activity, showArguments, showRaw))
+      .join("\n\n----------------------------------------\n\n");
+
+    try {
+      await navigator.clipboard.writeText(text || "Activity Terminal is empty.");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <section className={styles.resultPanel}>
+      <div className={styles.terminalHeader}>
+        <div className={styles.terminalTitleGroup}>
+          <span className={styles.terminalTitle}>
+            <Icon name="terminal" />
+            Activity Terminal
+          </span>
+          <span className={styles.terminalCount}>{activities.length} calls</span>
+        </div>
+        <div className={styles.terminalControls}>
+          <label className={styles.terminalToggle}>
+            <input
+              type="checkbox"
+              checked={autoScroll}
+              onChange={(event) => setAutoScroll(event.target.checked)}
+            />
+            Auto scroll
+          </label>
+          <label className={styles.terminalToggle}>
+            <input
+              type="checkbox"
+              checked={showArguments}
+              onChange={(event) => setShowArguments(event.target.checked)}
+            />
+            Arguments
+          </label>
+          <label className={styles.terminalToggle}>
+            <input
+              type="checkbox"
+              checked={showRaw}
+              onChange={(event) => setShowRaw(event.target.checked)}
+            />
+            Raw JSON
+          </label>
+          <button
+            type="button"
+            className={styles.terminalButton}
+            onClick={copyActivities}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button
+            type="button"
+            className={styles.terminalButton}
+            onClick={onClear}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div
+        ref={scrollRef}
+        className={styles.terminalScroll}
+        role="log"
+        aria-live="polite"
+      >
+        {activities.length === 0 ? (
+          <div className={styles.terminalEmpty}>
+            Run a tool or workspace action to see activity here.
+          </div>
+        ) : (
+          activities.map((activity) => (
+            <article
+              key={activity.id}
+              className={`${styles.activityEntry} ${
+                styles[`activity${activity.status[0].toUpperCase()}${activity.status.slice(1)}`]
+              }`}
+            >
+              <div className={styles.activityHeader}>
+                <div className={styles.activityIdentity}>
+                  <span className={styles.activityTime}>
+                    {activityTime(activity.timestamp)}
+                  </span>
+                  <span className={styles.activityStatus}>
+                    {activityStatusLabel(activity.status)}
+                  </span>
+                  <strong className={styles.activityName}>{activity.name}</strong>
+                </div>
+                <div className={styles.activityMeta}>
+                  <span>{activity.source ?? "unknown"}</span>
+                  {typeof activity.durationMs === "number" ? (
+                    <span>{activity.durationMs} ms</span>
+                  ) : null}
+                </div>
+              </div>
+
+              {activity.label && activity.label !== activity.name ? (
+                <div className={styles.activityLabel}>{activity.label}</div>
+              ) : null}
+
+              {showArguments && activity.args !== undefined ? (
+                <details className={styles.activityDetails}>
+                  <summary>Arguments</summary>
+                  <pre className={styles.activityCode}>
+                    {truncateActivityText(activity.args)}
+                  </pre>
+                </details>
+              ) : null}
+
+              {activity.error ? (
+                <pre className={`${styles.activityCode} ${styles.activityErrorText}`}>
+                  {activity.error}
+                </pre>
+              ) : activity.result !== undefined ? (
+                <pre className={styles.activityCode}>
+                  {truncateActivityText(
+                    showRaw && activity.rawResponse !== undefined
+                      ? activity.rawResponse
+                      : activity.result
+                  )}
+                </pre>
+              ) : activity.status === "running" ? (
+                <div className={styles.activityPending}>Waiting for response...</div>
+              ) : null}
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function Page() {
   const [tab, setTab] = useState("overview");
   const [boot, setBoot] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState("");
+  const [, setAction] = useState("");
   const [busy, setBusy] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState("");
-  const [outputTitle, setOutputTitle] = useState("Ready");
-  const [output, setOutput] = useState("Open the dashboard and run a tool.");
+  const [, setOutputTitle] = useState("Ready");
+  const [, setOutput] = useState("Open the dashboard and run a tool.");
   const [toolName, setToolName] = useState("workspace_server_info");
   const [argsJson, setArgsJson] = useState("{}");
   const [workspace, setWorkspace] = useState("ems");
@@ -252,8 +540,17 @@ export default function Page() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const [workspaceAccessMode, setWorkspaceAccessMode] = useState("read_only");
+  const [workspacePermissions, setWorkspacePermissions] = useState(() =>
+    clonePermissions(WORKSPACE_PERMISSION_PRESETS.read_only)
+  );
   const [editingWorkspaceId, setEditingWorkspaceId] = useState("");
   const [workspaceInspection, setWorkspaceInspection] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [activityAutoScroll, setActivityAutoScroll] = useState(true);
+  const [activityShowArguments, setActivityShowArguments] = useState(true);
+  const [activityShowRaw, setActivityShowRaw] = useState(false);
+  const bootstrapStartedRef = useRef(false);
 
   const tools = useMemo(
     () =>
@@ -271,10 +568,74 @@ export default function Page() {
   );
 
   useEffect(() => {
+    if (bootstrapStartedRef.current) {
+      return;
+    }
+
+    bootstrapStartedRef.current = true;
     loadBootstrap();
   }, []);
 
+  function beginActivity({ name, label, args, source = "GUI" }) {
+    const id = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startedAt = Date.now();
+
+    setActivities((current) => [
+      ...current.slice(-(MAX_ACTIVITY_ENTRIES - 1)),
+      {
+        id,
+        timestamp: startedAt,
+        startedAt,
+        name,
+        label,
+        args: compactActivityValue(args),
+        source,
+        status: "running",
+      },
+    ]);
+
+    return { id, startedAt };
+  }
+
+  function finishActivity(token, updates) {
+    if (!token?.id) {
+      return;
+    }
+
+    const preparedUpdates = { ...updates };
+
+    if (Object.prototype.hasOwnProperty.call(preparedUpdates, "result")) {
+      preparedUpdates.result = compactActivityValue(preparedUpdates.result);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(preparedUpdates, "rawResponse")) {
+      preparedUpdates.rawResponse = compactActivityValue(
+        preparedUpdates.rawResponse
+      );
+    }
+
+    setActivities((current) =>
+      current.map((activity) =>
+        activity.id === token.id
+          ? {
+              ...activity,
+              ...preparedUpdates,
+              durationMs: Math.max(0, Date.now() - token.startedAt),
+            }
+          : activity
+      )
+    );
+  }
+
   async function loadBootstrap() {
+    const activity = beginActivity({
+      name: "GET /api/bootstrap",
+      label: "Load dashboard bootstrap",
+      args: {},
+      source: "GUI API",
+    });
     setLoading(true);
     setWorkspaceBusy(false);
     setPickerBusy(false);
@@ -314,13 +675,35 @@ export default function Page() {
           : resolvedDefault
       );
       setOutputTitle("Bootstrap loaded");
-      setOutput(
-        `Backend: ${data.health?.serverVersion ?? "unknown"}\nTools: ${Array.isArray(data.tools) ? data.tools.length : 0}`
-      );
+      const backendOnline = data.health?.backendOnline !== false;
+      const bootstrapSummary = [
+        `Backend: ${data.health?.serverVersion ?? "unknown"}`,
+        `Endpoint: ${data.health?.backendUrl ?? "unknown"}`,
+        `Tools: ${Array.isArray(data.tools) ? data.tools.length : 0}`,
+        `Mode: ${backendOnline ? "MCP + local config" : "local-only"}`,
+        !backendOnline && data.health?.backendError
+          ? `Warning: ${data.health.backendError}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      setOutput(bootstrapSummary);
+      finishActivity(activity, {
+        status: backendOnline ? "success" : "warning",
+        source: data.health?.workspaceConfigSource
+          ? `GUI API / ${data.health.workspaceConfigSource}`
+          : "GUI API",
+        result: bootstrapSummary,
+        rawResponse: data,
+      });
     } catch (err) {
       setError(err.message);
       setOutputTitle("Connection error");
       setOutput(err.message);
+      finishActivity(activity, {
+        status: "error",
+        error: err.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -333,6 +716,12 @@ export default function Page() {
   }
 
   async function runTool(name, args, label) {
+    const activity = beginActivity({
+      name,
+      label: label || name,
+      args: args ?? {},
+      source: "MCP",
+    });
     setBusy(true);
     setAction(label || name);
     setError("");
@@ -351,12 +740,23 @@ export default function Page() {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
+      const resultText = data.text || firstText(data.result);
       setOutputTitle(label || name);
-      setOutput(data.text || firstText(data.result));
+      setOutput(resultText);
+      finishActivity(activity, {
+        status: "success",
+        source: data.source ?? "MCP",
+        result: resultText,
+        rawResponse: data,
+      });
     } catch (err) {
       setOutputTitle(label || name);
       setOutput(err.message);
       setError(err.message);
+      finishActivity(activity, {
+        status: "error",
+        error: err.message,
+      });
     } finally {
       setBusy(false);
     }
@@ -373,8 +773,30 @@ export default function Page() {
     setWorkspaceId("");
     setWorkspaceName("");
     setWorkspaceRoot("");
+    setWorkspaceAccessMode("read_only");
+    setWorkspacePermissions(
+      clonePermissions(WORKSPACE_PERMISSION_PRESETS.read_only)
+    );
     setEditingWorkspaceId("");
     setWorkspaceInspection(null);
+  }
+
+  function selectWorkspaceAccessMode(mode) {
+    setWorkspaceAccessMode(mode);
+
+    if (WORKSPACE_PERMISSION_PRESETS[mode]) {
+      setWorkspacePermissions(
+        clonePermissions(WORKSPACE_PERMISSION_PRESETS[mode])
+      );
+    }
+  }
+
+  function setCustomWorkspacePermission(key, enabled) {
+    setWorkspaceAccessMode("custom");
+    setWorkspacePermissions((current) => ({
+      ...current,
+      [key]: enabled,
+    }));
   }
 
   function editWorkspace(item) {
@@ -392,27 +814,57 @@ export default function Page() {
     setWorkspaceRoot(
       typeof item.root === "string" ? item.root : ""
     );
+    const permissions = clonePermissions(item.permissions);
+    setWorkspacePermissions(permissions);
+    setWorkspaceAccessMode(permissionModeFor(permissions));
     setEditingWorkspaceId(id);
     setWorkspaceInspection(null);
     setTab("workspaces");
   }
 
-  async function requestJson(url, options = {}) {
-    const response = await fetch(url, {
-      cache: "no-store",
-      ...options,
-      headers: {
-        "content-type": "application/json",
-        ...(options.headers ?? {}),
-      },
+  async function requestJson(url, options = {}, activityOptions = {}) {
+    const method = options.method ?? "GET";
+    const activity = beginActivity({
+      name: activityOptions.name ?? `${method} ${url}`,
+      label: activityOptions.label ?? `${method} ${url}`,
+      args: activityOptions.args ?? {},
+      source: activityOptions.source ?? "GUI API",
     });
-    const data = await response.json().catch(() => ({}));
 
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        ...options,
+        headers: {
+          "content-type": "application/json",
+          ...(options.headers ?? {}),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+
+      finishActivity(activity, {
+        status: activityOptions.status?.(data) ?? "success",
+        source: data.source ?? activityOptions.source ?? "GUI API",
+        result:
+          activityOptions.result?.(data) ??
+          data.result ??
+          data.inspection ??
+          data.selection ??
+          data,
+        rawResponse: data,
+      });
+      return data;
+    } catch (error) {
+      finishActivity(activity, {
+        status: "error",
+        error: error.message,
+      });
+      throw error;
     }
-
-    return data;
   }
 
   async function validateWorkspacePath() {
@@ -426,10 +878,19 @@ export default function Page() {
     setError("");
 
     try {
-      const data = await requestJson("/api/workspaces/validate", {
-        method: "POST",
-        body: JSON.stringify({ root: workspaceRoot }),
-      });
+      const data = await requestJson(
+        "/api/workspaces/validate",
+        {
+          method: "POST",
+          body: JSON.stringify({ root: workspaceRoot }),
+        },
+        {
+          name: "workspace_validate_path",
+          label: "Validate workspace path",
+          args: { root: workspaceRoot },
+          source: "Local workspace API",
+        }
+      );
       const inspection = data.inspection ?? {};
       setWorkspaceRoot(
         typeof inspection.root === "string" ? inspection.root : workspaceRoot
@@ -456,10 +917,21 @@ export default function Page() {
     setError("");
 
     try {
-      const data = await requestJson("/api/workspaces/pick", {
-        method: "POST",
-        body: "{}",
-      });
+      const data = await requestJson(
+        "/api/workspaces/pick",
+        {
+          method: "POST",
+          body: "{}",
+        },
+        {
+          name: "workspace_pick_directory",
+          label: "Open Windows folder picker",
+          args: {},
+          source: "Windows picker / Local API",
+          status: (responseData) =>
+            responseData.selection?.cancelled ? "cancelled" : "success",
+        }
+      );
 
       const selection = data.selection ?? {};
 
@@ -502,17 +974,25 @@ export default function Page() {
 
     try {
       const editing = Boolean(editingWorkspaceId);
+      const workspacePayload = {
+        id: workspaceId.trim(),
+        name: workspaceName.trim(),
+        root: workspaceRoot.trim(),
+        permissions: clonePermissions(workspacePermissions),
+      };
       const data = await requestJson(
         editing
           ? `/api/workspaces/${encodeURIComponent(editingWorkspaceId)}`
           : "/api/workspaces",
         {
           method: editing ? "PATCH" : "POST",
-          body: JSON.stringify({
-            id: workspaceId.trim(),
-            name: workspaceName.trim(),
-            root: workspaceRoot.trim(),
-          }),
+          body: JSON.stringify(workspacePayload),
+        },
+        {
+          name: editing ? "workspace_update" : "workspace_add",
+          label: editing ? "Update workspace" : "Add workspace",
+          args: workspacePayload,
+          source: "Local workspace API",
         }
       );
       const selectedId = editingWorkspaceId || workspaceId.trim();
@@ -547,7 +1027,13 @@ export default function Page() {
     try {
       const data = await requestJson(
         `/api/workspaces/${encodeURIComponent(id)}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
+        {
+          name: "workspace_remove",
+          label: "Remove workspace",
+          args: { id, confirm: true },
+          source: "Local workspace API",
+        }
       );
       await loadBootstrap();
       resetWorkspaceEditor();
@@ -575,7 +1061,13 @@ export default function Page() {
     try {
       const data = await requestJson(
         `/api/workspaces/${encodeURIComponent(id)}/default`,
-        { method: "POST", body: "{}" }
+        { method: "POST", body: "{}" },
+        {
+          name: "workspace_set_default",
+          label: "Set default workspace",
+          args: { id },
+          source: "Local workspace API",
+        }
       );
       await loadBootstrap();
       setWorkspace(id);
@@ -603,7 +1095,13 @@ export default function Page() {
             </div>
             <span className={`${styles.badge} ${styles.badgeStrong}`}>
               <Icon name="terminal" />
-              {loading ? "Loading" : error ? "Offline" : "Online"}
+              {loading
+                ? "Loading"
+                : boot?.health?.backendOnline === false
+                  ? "Local only"
+                  : error
+                    ? "Offline"
+                    : "Online"}
             </span>
           </div>
 
@@ -734,7 +1232,9 @@ export default function Page() {
                     </span>
                   </div>
                   <p className={styles.panelNote}>
-                    {error || "Ready for file, git, and script actions."}
+                    {error ||
+                      boot?.health?.backendError ||
+                      "Ready for file, git, and script actions."}
                   </p>
                 </div>
               </Panel>
@@ -806,7 +1306,7 @@ export default function Page() {
                     ? `Edit workspace: ${editingWorkspaceId}`
                     : "Add workspace"
                 }
-                note="Workspace moi mac dinh chi doc, khong duoc ghi file, commit hay chay command."
+                note="Choose Read only, Full access, or Custom permissions. The global MCP_WRITE_ENABLED switch still controls write, commit, and execute operations."
               >
                 <div className={styles.fieldGrid}>
                   <Field
@@ -855,6 +1355,60 @@ export default function Page() {
                       </button>
                     </div>
                   </Field>
+
+                  <Field
+                    label="Access level"
+                    hint="Full access grants all workspace permissions. Execute remains limited to the safe command allowlist."
+                  >
+                    <div className={styles.accessModeGroup}>
+                      {[
+                        ["read_only", "Read only"],
+                        ["full", "Full access"],
+                        ["custom", "Custom"],
+                      ].map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`${styles.accessModeButton} ${
+                            workspaceAccessMode === mode
+                              ? styles.accessModeButtonActive
+                              : ""
+                          }`}
+                          onClick={() => selectWorkspaceAccessMode(mode)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+
+                  <div className={styles.permissionGrid}>
+                    {WORKSPACE_PERMISSION_KEYS.map(([key, label, description]) => (
+                      <label
+                        key={key}
+                        className={`${styles.permissionOption} ${
+                          workspacePermissions[key]
+                            ? styles.permissionOptionActive
+                            : ""
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={workspacePermissions[key]}
+                          onChange={(event) =>
+                            setCustomWorkspacePermission(
+                              key,
+                              event.target.checked
+                            )
+                          }
+                        />
+                        <span className={styles.permissionOptionText}>
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
 
                   {workspaceInspection ? (
                     <div className={styles.inspectionBox}>
@@ -941,7 +1495,22 @@ export default function Page() {
                       </div>
 
                       <div className={styles.inlineRow}>
-                        <span className={styles.badge}>Read</span>
+                        <span
+                          className={`${styles.badge} ${
+                            permissionModeFor(item.permissions) === "full"
+                              ? styles.badgeStrong
+                              : ""
+                          }`}
+                        >
+                          {permissionModeFor(item.permissions) === "full"
+                            ? "Full access"
+                            : permissionModeFor(item.permissions) === "read_only"
+                              ? "Read only"
+                              : "Custom"}
+                        </span>
+                        <span className={styles.badge}>
+                          {item.permissions?.read ? "Read" : "No read"}
+                        </span>
                         {item.permissions?.write ? (
                           <span className={styles.badge}>Write</span>
                         ) : (
@@ -1635,17 +2204,16 @@ export default function Page() {
             </div>
           ) : null}
 
-          <div className={styles.resultPanel}>
-            <div className={styles.resultMeta}>
-              <span>{outputTitle}</span>
-              <span>
-                {busy || workspaceBusy || pickerBusy
-                  ? `Running ${action}...`
-                  : "Idle"}
-              </span>
-            </div>
-            <pre className={styles.resultText}>{output}</pre>
-          </div>
+          <ActivityTerminal
+            activities={activities}
+            autoScroll={activityAutoScroll}
+            setAutoScroll={setActivityAutoScroll}
+            showArguments={activityShowArguments}
+            setShowArguments={setActivityShowArguments}
+            showRaw={activityShowRaw}
+            setShowRaw={setActivityShowRaw}
+            onClear={() => setActivities([])}
+          />
         </section>
       </div>
     </main>

@@ -64,6 +64,7 @@ export async function POST(request) {
         id: body.id,
         name: body.name,
         root: body.root,
+        permissions: body.permissions,
       }),
     });
 
@@ -81,6 +82,7 @@ export async function POST(request) {
           id: body.id,
           name: body.name,
           root: body.root,
+          permissions: body.permissions,
         });
         return NextResponse.json(
           { ok: true, result, source: "local-config" },

@@ -27,6 +27,14 @@ export const READ_ONLY_PERMISSIONS = Object.freeze({
   execute: false,
 });
 
+export const FULL_PERMISSIONS = Object.freeze({
+  read: true,
+  write: true,
+  git: true,
+  commit: true,
+  execute: true,
+});
+
 const LEGACY_PERMISSIONS = Object.freeze({
   read: true,
   write: true,
@@ -61,6 +69,20 @@ function normalizePermissions(value, fallback = READ_ONLY_PERMISSIONS) {
     commit: source.commit === true,
     execute: source.execute === true,
   };
+}
+
+function mergePermissions(current, changes) {
+  if (!changes || typeof changes !== "object") {
+    return normalizePermissions(current, current);
+  }
+
+  return normalizePermissions(
+    {
+      ...current,
+      ...changes,
+    },
+    current
+  );
 }
 
 function normalizeWorkspace(id, value, fallbackPermissions) {
@@ -295,7 +317,7 @@ export class WorkspaceRegistry {
     return inspectWorkspaceRoot(root);
   }
 
-  async add({ id, name, root }) {
+  async add({ id, name, root, permissions }) {
     return this.#mutate(async (draft) => {
       const workspaceId = validateWorkspaceId(id);
 
@@ -312,7 +334,10 @@ export class WorkspaceRegistry {
             : workspaceId,
         root: inspection.root,
         enabled: true,
-        permissions: { ...READ_ONLY_PERMISSIONS },
+        permissions: normalizePermissions(
+          permissions,
+          READ_ONLY_PERMISSIONS
+        ),
       };
 
       return {
@@ -344,6 +369,13 @@ export class WorkspaceRegistry {
       if (changes.root !== undefined && changes.root !== current.root) {
         inspection = await inspectWorkspaceRoot(changes.root);
         current.root = inspection.root;
+      }
+
+      if (changes.permissions !== undefined) {
+        current.permissions = mergePermissions(
+          current.permissions,
+          changes.permissions
+        );
       }
 
       return { workspace: clone(current), inspection };

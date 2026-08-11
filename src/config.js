@@ -1,4 +1,4 @@
-export const SERVER_VERSION = "2.2.0";
+export const SERVER_VERSION = "2.3.0";
 
 export const PORT = Number(process.env.PORT ?? 8787);
 export const HOST = process.env.HOST ?? "127.0.0.1";
@@ -99,29 +99,29 @@ export const SAFE_RUNNERS = {
 
 export const SAFE_COMMAND_PREFIXES = Object.freeze([
   {
-    title: "BESS npm run",
-    workspace: "bess",
+    title: "Workspace npm run",
+    workspace: "*",
     cwdChoices: [".", "web"],
     command: NPM_COMMAND,
     argsPrefix: ["run"],
   },
   {
-    title: "BESS npm test",
-    workspace: "bess",
+    title: "Workspace npm test",
+    workspace: "*",
     cwdChoices: [".", "web"],
     command: NPM_COMMAND,
     argsPrefix: ["test"],
   },
   {
-    title: "EMS pytest",
-    workspace: "ems",
+    title: "Workspace pytest",
+    workspace: "*",
     cwdChoices: ["."],
     command: PYTHON_COMMAND,
     argsPrefix: ["-m", "pytest"],
   },
   {
-    title: "EMS compileall",
-    workspace: "ems",
+    title: "Workspace compileall",
+    workspace: "*",
     cwdChoices: ["."],
     command: PYTHON_COMMAND,
     argsPrefix: ["-m", "compileall"],

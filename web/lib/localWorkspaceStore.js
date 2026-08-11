@@ -45,6 +45,20 @@ function normalizePermissions(value, fallback = readOnlyPermissions) {
   };
 }
 
+function mergePermissions(current, changes) {
+  if (!changes || typeof changes !== "object") {
+    return normalizePermissions(current, current);
+  }
+
+  return normalizePermissions(
+    {
+      ...current,
+      ...changes,
+    },
+    current
+  );
+}
+
 function normalizeState(rawState) {
   if (!rawState || typeof rawState !== "object") {
     throw new Error("File cau hinh workspace khong hop le.");
@@ -166,7 +180,7 @@ export async function getLocalWorkspaceSnapshot() {
   };
 }
 
-export async function addLocalWorkspace({ id, name, root }) {
+export async function addLocalWorkspace({ id, name, root, permissions }) {
   return mutate(async (draft) => {
     const workspaceId = validateWorkspaceId(id);
 
@@ -183,11 +197,14 @@ export async function addLocalWorkspace({ id, name, root }) {
           : workspaceId,
       root: inspection.root,
       enabled: true,
-      permissions: { ...readOnlyPermissions },
+      permissions: normalizePermissions(
+        permissions,
+        readOnlyPermissions
+      ),
     };
     draft.workspaces[workspaceId] = workspace;
 
-    return { workspace, inspection, backendRestartRequired: true };
+    return { workspace, inspection, backendRestartRequired: false };
   });
 }
 
@@ -215,10 +232,17 @@ export async function updateLocalWorkspace(id, changes = {}) {
       workspace.root = inspection.root;
     }
 
+    if (changes.permissions !== undefined) {
+      workspace.permissions = mergePermissions(
+        workspace.permissions,
+        changes.permissions
+      );
+    }
+
     return {
       workspace: clone(workspace),
       inspection,
-      backendRestartRequired: true,
+      backendRestartRequired: false,
     };
   });
 }
@@ -244,7 +268,7 @@ export async function removeLocalWorkspace(id) {
     return {
       removed: workspaceId,
       defaultWorkspace: draft.defaultWorkspace,
-      backendRestartRequired: true,
+      backendRestartRequired: false,
     };
   });
 }
@@ -260,7 +284,7 @@ export async function setLocalDefaultWorkspace(id) {
     draft.defaultWorkspace = workspaceId;
     return {
       defaultWorkspace: workspaceId,
-      backendRestartRequired: true,
+      backendRestartRequired: false,
     };
   });
 }

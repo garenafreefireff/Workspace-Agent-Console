@@ -63,7 +63,10 @@ async function findMatchingCommandPrefix(
   const normalizedCommand = normalizeCommandName(command);
 
   for (const rule of SAFE_COMMAND_PREFIXES) {
-    if (rule.workspace !== selected.id) {
+    if (
+      rule.workspace !== "*" &&
+      rule.workspace !== selected.id
+    ) {
       continue;
     }
 

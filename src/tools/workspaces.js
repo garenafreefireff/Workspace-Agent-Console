@@ -20,6 +20,16 @@ function mutationAnnotations() {
   };
 }
 
+const permissionsSchema = z
+  .object({
+    read: z.boolean().optional(),
+    write: z.boolean().optional(),
+    git: z.boolean().optional(),
+    commit: z.boolean().optional(),
+    execute: z.boolean().optional(),
+  })
+  .optional();
+
 export function registerWorkspaceTools(server) {
   server.registerTool(
     "workspace_server_info",
@@ -91,11 +101,12 @@ export function registerWorkspaceTools(server) {
     {
       title: "Add workspace",
       description:
-        "Register a local directory as a new read-only workspace. New workspaces cannot write, commit, or execute commands.",
+        "Register a local directory as a new workspace. Optional permissions control read, write, Git inspection, commit, and command execution access.",
       inputSchema: {
         id: z.string().min(1).max(50),
         name: z.string().min(1).max(120),
         root: z.string().min(1),
+        permissions: permissionsSchema,
       },
       annotations: mutationAnnotations(),
     },
@@ -113,18 +124,23 @@ export function registerWorkspaceTools(server) {
     {
       title: "Update workspace",
       description:
-        "Update the display name or root directory of an existing workspace without restarting the MCP server.",
+        "Update the display name, root directory, or permissions of an existing workspace without restarting the MCP server.",
       inputSchema: {
         id: z.string().min(1).max(50),
         name: z.string().min(1).max(120).optional(),
         root: z.string().min(1).optional(),
+        permissions: permissionsSchema,
       },
       annotations: mutationAnnotations(),
     },
-    async ({ id, name, root }) => {
+    async ({ id, name, root, permissions }) => {
       try {
         return jsonResult(
-          await workspaceRegistry.update(id, { name, root })
+          await workspaceRegistry.update(id, {
+            name,
+            root,
+            permissions,
+          })
         );
       } catch (error) {
         return textResult(`Loi: ${error.message}`);

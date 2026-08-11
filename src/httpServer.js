@@ -162,6 +162,7 @@ export function createWorkspaceHttpServer() {
           id: body.id,
           name: body.name,
           root: body.root,
+          permissions: body.permissions,
         });
         sendJson(response, 201, { ok: true, result });
       } catch (error) {
@@ -206,6 +207,7 @@ export function createWorkspaceHttpServer() {
         const result = await workspaceRegistry.update(workspaceId, {
           name: body.name,
           root: body.root,
+          permissions: body.permissions,
         });
         sendJson(response, 200, { ok: true, result });
       } catch (error) {

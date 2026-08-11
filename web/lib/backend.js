@@ -1,9 +1,60 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { getLocalWorkspaceSnapshot } from "./localWorkspaceStore.js";
 
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(moduleDirectory, "..", "..");
+const rootEnvFile = path.join(projectRoot, ".env");
+
+function readRootEnv() {
+  if (!existsSync(rootEnvFile)) {
+    return {};
+  }
+
+  const values = {};
+  const content = readFileSync(rootEnvFile, "utf8");
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    let value = trimmed.slice(separatorIndex + 1).trim();
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    values[key] = value;
+  }
+
+  return values;
+}
+
+const rootEnv = readRootEnv();
+const configuredHost =
+  process.env.BACKEND_HOST ?? rootEnv.HOST ?? "127.0.0.1";
+const backendHost =
+  configuredHost === "0.0.0.0" ? "127.0.0.1" : configuredHost;
+const backendPort =
+  process.env.BACKEND_PORT ?? rootEnv.PORT ?? "8787";
 const BACKEND_URL =
-  process.env.BACKEND_URL ?? "http://127.0.0.1:8787";
+  process.env.BACKEND_URL ?? `http://${backendHost}:${backendPort}`;
 const HEALTH_URL = new URL("/health", BACKEND_URL);
 const MCP_URL = new URL("/mcp-v2", BACKEND_URL);
 
@@ -51,19 +102,31 @@ export async function callBackendRest(pathname, options = {}) {
 }
 
 export async function getBackendHealth() {
-  const response = await fetch(HEALTH_URL, { cache: "no-store" });
+  try {
+    const response = await fetch(HEALTH_URL, { cache: "no-store" });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    const detail = error?.cause?.code ?? error?.message ?? "fetch failed";
     throw new Error(
-      `Backend health check failed: ${response.status}`
+      `Backend unavailable at ${HEALTH_URL.href}: ${detail}`
     );
   }
-
-  return response.json();
 }
 
 export async function listBackendTools() {
-  return withClient((client) => client.listTools());
+  try {
+    return await withClient((client) => client.listTools());
+  } catch (error) {
+    const detail = error?.cause?.code ?? error?.message ?? "connection failed";
+    throw new Error(
+      `MCP unavailable at ${MCP_URL.href}: ${detail}`
+    );
+  }
 }
 
 export async function callBackendTool(name, args = {}) {
@@ -173,19 +236,43 @@ export function extractText(result) {
 }
 
 export async function getBootstrapData() {
-  const [health, tools, localWorkspaceSnapshot] = await Promise.all([
+  const localWorkspaceSnapshot = await getLocalWorkspaceSnapshot();
+  const [healthResult, toolsResult] = await Promise.allSettled([
     getBackendHealth(),
     listBackendTools(),
-    getLocalWorkspaceSnapshot(),
   ]);
+
+  const backendOnline = healthResult.status === "fulfilled";
+  const health = backendOnline
+    ? healthResult.value
+    : {
+        serverVersion: "offline",
+        workingDirectory: null,
+        mcpPaths: [],
+      };
+  const tools =
+    toolsResult.status === "fulfilled"
+      ? toolsResult.value.tools ?? []
+      : [];
+  const backendErrors = [
+    healthResult.status === "rejected"
+      ? `Health: ${healthResult.reason?.message ?? "fetch failed"}`
+      : null,
+    toolsResult.status === "rejected"
+      ? `Tools: ${toolsResult.reason?.message ?? "fetch failed"}`
+      : null,
+  ].filter(Boolean);
 
   return {
     health: {
       ...health,
+      backendOnline,
+      backendUrl: BACKEND_URL,
+      backendError: backendErrors.join(" | ") || null,
       defaultWorkspace: localWorkspaceSnapshot.defaultWorkspace,
       workspaces: localWorkspaceSnapshot.workspaces,
       workspaceConfigSource: "local-config",
     },
-    tools: tools.tools ?? [],
+    tools,
   };
 }

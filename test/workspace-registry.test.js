@@ -8,7 +8,7 @@ import {
   assertWorkspacePermission,
 } from "../src/services/workspaceRegistry.js";
 
-test("workspace registry supports live CRUD with read-only defaults", async () => {
+test("workspace registry supports live CRUD and permission updates", async () => {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "workspace-registry-")
   );
@@ -77,6 +77,25 @@ test("workspace registry supports live CRUD with read-only defaults", async () =
       /khong co quyen write/
     );
 
+    await registry.update("second", {
+      permissions: {
+        write: true,
+        commit: true,
+        execute: true,
+      },
+    });
+    const elevatedWorkspace = registry.get("second");
+    assert.deepEqual(elevatedWorkspace.permissions, {
+      read: true,
+      write: true,
+      git: true,
+      commit: true,
+      execute: true,
+    });
+    assert.doesNotThrow(() =>
+      assertWorkspacePermission(elevatedWorkspace, "write")
+    );
+
     await registry.setDefault("second");
     assert.equal(registry.getDefaultWorkspaceName(), "second");
 
@@ -99,7 +118,11 @@ test("workspace registry supports live CRUD with read-only defaults", async () =
     assert.equal(persisted.defaultWorkspace, "second");
     assert.equal(
       persisted.workspaces.second.permissions.write,
-      false
+      true
+    );
+    assert.equal(
+      persisted.workspaces.second.permissions.execute,
+      true
     );
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

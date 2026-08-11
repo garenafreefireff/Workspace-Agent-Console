@@ -41,6 +41,10 @@ export async function PATCH(request, context) {
     changes.root = body.root;
   }
 
+  if (body.permissions !== undefined) {
+    changes.permissions = body.permissions;
+  }
+
   try {
     const data = await callBackendRest(
       `/api/workspaces/${encodeURIComponent(id)}`,

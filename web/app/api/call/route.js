@@ -66,6 +66,7 @@ async function runLocalWorkspaceTool(tool, args = {}) {
     const operation = await updateLocalWorkspace(args.id, {
       name: args.name,
       root: args.root,
+      permissions: args.permissions,
     });
     return operation.result;
   }
