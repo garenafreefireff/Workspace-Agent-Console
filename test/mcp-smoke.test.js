@@ -29,7 +29,29 @@ test("health endpoint responds with workspace metadata", async () => {
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.schemaMode, "dynamic-multi-workspace");
+    assert.equal(body.loopApi, "/api/loops");
+    assert.ok(body.loopCapabilities?.verifiers?.includes("http_api"));
+    assert.ok(body.loopCapabilities?.verifiers?.includes("websocket_probe"));
+    assert.equal(body.loopCapabilities?.evidenceRedaction, true);
+    assert.equal(body.loopCapabilities?.networkAllowlist, true);
+    assert.equal(typeof body.loopCapabilities?.nativeWebSocket, "boolean");
     assert.ok(Array.isArray(body.workspaces));
+  } finally {
+    await close(server);
+  }
+});
+
+test("loop REST list endpoint responds", async () => {
+  const server = createWorkspaceHttpServer();
+  const port = await listen(server);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/loops`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.ok(Array.isArray(body.runs));
   } finally {
     await close(server);
   }
@@ -69,6 +91,10 @@ test("MCP server registers core and extended tools", async () => {
       "workspace_git_log",
       "workspace_git_show",
       "workspace_git_commit",
+      "loop_run",
+      "loop_status",
+      "loop_memory",
+      "loop_stop",
     ]) {
       assert.ok(
         toolNames.includes(expected),
@@ -76,7 +102,7 @@ test("MCP server registers core and extended tools", async () => {
       );
     }
 
-    assert.ok(toolNames.length >= 27);
+    assert.ok(toolNames.length >= 31);
   } finally {
     await client.close();
     await close(server);

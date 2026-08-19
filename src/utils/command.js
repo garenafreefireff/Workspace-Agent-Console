@@ -19,6 +19,59 @@ import { limitOutput } from "./result.js";
 
 export const execFile = promisify(execFileCallback);
 
+const WINDOWS_BATCH_EXTENSION = /\.(?:cmd|bat)$/i;
+const SAFE_WINDOWS_BATCH_TOKEN = /^[A-Za-z0-9_./:@=,+\-\\]+$/;
+
+function buildWindowsBatchCommand(command, args) {
+  const tokens = [command, ...args];
+
+  for (const token of tokens) {
+    if (
+      typeof token !== "string" ||
+      !token ||
+      !SAFE_WINDOWS_BATCH_TOKEN.test(token)
+    ) {
+      throw new Error(
+        `Windows batch argument khong an toan hoac khong duoc ho tro: ${String(token)}`
+      );
+    }
+  }
+
+  return tokens.join(" ");
+}
+
+/**
+ * Node cannot execute .cmd/.bat files directly with execFile on Windows.
+ * Keep normal executables on execFile, and route only allowlisted batch
+ * commands through cmd.exe with a deliberately restricted token grammar.
+ */
+export function resolvePortableInvocation(
+  command,
+  args = [],
+  {
+    platform = process.platform,
+    commandProcessor =
+      process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+  } = {}
+) {
+  if (
+    platform === "win32" &&
+    WINDOWS_BATCH_EXTENSION.test(path.basename(command))
+  ) {
+    return {
+      command: commandProcessor,
+      args: ["/d", "/s", "/c", buildWindowsBatchCommand(command, args)],
+    };
+  }
+
+  return { command, args };
+}
+
+export async function execPortableFile(command, args = [], options = {}) {
+  const invocation = resolvePortableInvocation(command, args);
+  return execFile(invocation.command, invocation.args, options);
+}
+
 function normalizeCommandName(command) {
   const basename = path.basename(command).toLowerCase();
 
@@ -104,7 +157,13 @@ async function findMatchingCommandPrefix(
   );
 }
 
-export async function runAllowedCommand(runnerName) {
+export async function runConfiguredRunner(
+  runnerName,
+  {
+    workspaceRoot,
+    workspaceName,
+  } = {}
+) {
   const runner = SAFE_RUNNERS[runnerName];
 
   if (!runner) {
@@ -113,11 +172,15 @@ export async function runAllowedCommand(runnerName) {
 
   const selected = getWorkspace(runner.workspace);
   assertWorkspacePermission(selected, "execute");
+  const effectiveRoot = workspaceRoot
+    ? path.resolve(workspaceRoot)
+    : selected.root;
   const workingDirectory = await resolveExistingPath(
-    selected.root,
+    effectiveRoot,
     runner.cwd
   );
   const stat = await fs.stat(workingDirectory);
+  const effectiveWorkspaceName = workspaceName ?? selected.name;
 
   if (!stat.isDirectory()) {
     throw new Error(
@@ -127,18 +190,19 @@ export async function runAllowedCommand(runnerName) {
 
   console.log("[COMMAND] Starting", {
     runner: runnerName,
-    workspace: selected.name,
+    workspace: effectiveWorkspaceName,
     cwd: toWorkspaceRelative(
-      selected.root,
+      effectiveRoot,
       workingDirectory
     ),
     command: runner.command,
     args: runner.args,
+    isolatedRoot: workspaceRoot ? effectiveRoot : null,
   });
 
   try {
     const { stdout = "", stderr = "" } =
-      await execFile(runner.command, runner.args, {
+      await execPortableFile(runner.command, runner.args, {
         cwd: workingDirectory,
         windowsHide: true,
         timeout: COMMAND_TIMEOUT_MS,
@@ -154,19 +218,19 @@ export async function runAllowedCommand(runnerName) {
 
     console.log("[COMMAND] Completed", {
       runner: runnerName,
-      workspace: selected.name,
+      workspace: effectiveWorkspaceName,
     });
 
     return {
       success: true,
-      workspace: selected.name,
+      workspace: effectiveWorkspaceName,
       stdout: limitOutput(stdout),
       stderr: limitOutput(stderr),
     };
   } catch (error) {
     console.error("[COMMAND] Failed", {
       runner: runnerName,
-      workspace: selected.name,
+      workspace: effectiveWorkspaceName,
       code: error.code,
       signal: error.signal,
       message: error.message,
@@ -174,7 +238,7 @@ export async function runAllowedCommand(runnerName) {
 
     return {
       success: false,
-      workspace: selected.name,
+      workspace: effectiveWorkspaceName,
       code: error.code ?? null,
       signal: error.signal ?? null,
       stdout: limitOutput(error.stdout ?? ""),
@@ -183,6 +247,10 @@ export async function runAllowedCommand(runnerName) {
       ),
     };
   }
+}
+
+export async function runAllowedCommand(runnerName) {
+  return runConfiguredRunner(runnerName);
 }
 
 export async function runAllowedPrefixCommand({
@@ -215,7 +283,7 @@ export async function runAllowedPrefixCommand({
 
   try {
     const { stdout = "", stderr = "" } =
-      await execFile(rule.command, args, {
+      await execPortableFile(rule.command, args, {
         cwd: workingDirectory,
         windowsHide: true,
         timeout: COMMAND_TIMEOUT_MS,

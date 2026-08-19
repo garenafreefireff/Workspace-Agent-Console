@@ -76,14 +76,27 @@ async function withClient(handler) {
 
 export async function callBackendRest(pathname, options = {}) {
   const url = new URL(pathname, BACKEND_URL);
-  const response = await fetch(url, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      "content-type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
+  let response;
+
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      ...options,
+      headers: {
+        "content-type": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
+  } catch (cause) {
+    const detail = cause?.cause?.code ?? cause?.message ?? "fetch failed";
+    const error = new Error(
+      `Backend REST unavailable at ${url.href}: ${detail}`
+    );
+    error.code = "WORKSPACE_REST_UNAVAILABLE";
+    error.cause = cause;
+    throw error;
+  }
+
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok || data.ok === false) {

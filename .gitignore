@@ -16,6 +16,8 @@ build/
 *.log
 data/workspaces.json
 data/*.tmp
+data/loops/
+data/loop-worktrees/
 backend.err.log
 backend.out.log
 web.err.log

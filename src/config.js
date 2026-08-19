@@ -1,4 +1,4 @@
-export const SERVER_VERSION = "2.3.0";
+export const SERVER_VERSION = "2.6.1";
 
 export const PORT = Number(process.env.PORT ?? 8787);
 export const HOST = process.env.HOST ?? "127.0.0.1";
@@ -52,6 +52,13 @@ export const SAFE_RUNNERS = {
     cwd: ".",
     command: NPM_COMMAND,
     args: ["run", "build"],
+  },
+  bess_root_e2e: {
+    title: "BESS root Loop browser verification",
+    workspace: "bess",
+    cwd: ".",
+    command: NPM_COMMAND,
+    args: ["run", "test:e2e:loop"],
   },
   bess_frontend_lint: {
     title: "BESS frontend lint",

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SERVER_VERSION } from "./config.js";
 import { registerFileTools } from "./tools/files.js";
 import { registerGitTools } from "./tools/git.js";
+import { registerLoopTools } from "./tools/loops.js";
 import { registerPatchTools } from "./tools/patch.js";
 import { registerScriptTools } from "./tools/scripts.js";
 import { registerWorkspaceTools } from "./tools/workspaces.js";
@@ -16,6 +17,7 @@ export function createWorkspaceServer() {
   registerFileTools(server);
   registerGitTools(server);
   registerScriptTools(server);
+  registerLoopTools(server);
   registerPatchTools(server);
 
   return server;

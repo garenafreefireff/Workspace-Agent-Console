@@ -8,10 +8,17 @@ import {
 } from "./config.js";
 import { createWorkspaceServer } from "./mcpServer.js";
 import {
+  getLoopStatus,
+  runLoopIteration,
+  stopLoopRun,
+  updateLoopMemory,
+} from "./services/loopStore.js";
+import {
   getDefaultWorkspaceName,
   listWorkspaces,
   workspaceRegistry,
 } from "./services/workspaceRegistry.js";
+import { assertWriteEnabled } from "./utils/writeGuard.js";
 
 const JSON_BODY_LIMIT = 64 * 1024;
 
@@ -58,6 +65,21 @@ function workspaceDefaultApiMatch(pathname) {
   const match = pathname.match(
     /^\/api\/workspaces\/([^/]+)\/default$/
   );
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function loopApiMatch(pathname) {
+  const match = pathname.match(/^\/api\/loops\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function loopStopApiMatch(pathname) {
+  const match = pathname.match(/^\/api\/loops\/([^/]+)\/stop$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function loopMemoryApiMatch(pathname) {
+  const match = pathname.match(/^\/api\/loops\/([^/]+)\/memory$/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -136,6 +158,23 @@ export function createWorkspaceHttpServer() {
               workingDirectory: process.cwd(),
               mcpPaths: MCP_PATHS,
               workspaceApi: "/api/workspaces",
+              loopApi: "/api/loops",
+              loopCapabilities: {
+                verifiers: [
+                  "browser_runner",
+                  "sld_geometry",
+                  "http_api",
+                  "websocket_probe",
+                  "socketio_probe",
+                ],
+                secretTemplates: true,
+                evidenceRedaction: true,
+                networkAllowlist: true,
+                nativeWebSocket: typeof globalThis.WebSocket === "function",
+                webSocketFallback: "ws-if-installed",
+                worktreeIsolation: true,
+                durableMemory: true,
+              },
               defaultWorkspace: getDefaultWorkspaceName(),
               workspaces: listWorkspaces(),
             },
@@ -143,6 +182,92 @@ export function createWorkspaceHttpServer() {
             2
           )
         );
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/loops") {
+      try {
+        sendJson(response, 200, {
+          ok: true,
+          runs: await getLoopStatus(),
+        });
+      } catch (error) {
+        sendJson(response, 500, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/loops/run") {
+      try {
+        assertWriteEnabled();
+        const body = await readJsonBody(request);
+        const result = await runLoopIteration({
+          runId: body.runId,
+          spec: body.spec,
+          criterionResults: body.criterionResults ?? [],
+          iterationContext: body.iterationContext,
+        });
+        sendJson(response, body.runId ? 200 : 201, { ok: true, result });
+      } catch (error) {
+        sendJson(response, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const loopMemoryId = loopMemoryApiMatch(url.pathname);
+
+    if (request.method === "GET" && loopMemoryId) {
+      try {
+        const run = await getLoopStatus(loopMemoryId);
+        sendJson(response, 200, { ok: true, memory: run.memory ?? {} });
+      } catch (error) {
+        sendJson(response, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && loopMemoryId) {
+      try {
+        assertWriteEnabled();
+        const body = await readJsonBody(request);
+        const memory = await updateLoopMemory(loopMemoryId, {
+          note: body.note,
+          lesson: body.lesson,
+        });
+        sendJson(response, 200, { ok: true, memory });
+      } catch (error) {
+        sendJson(response, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const loopStopId = loopStopApiMatch(url.pathname);
+
+    if (request.method === "POST" && loopStopId) {
+      try {
+        const body = await readJsonBody(request);
+        const result = await stopLoopRun(
+          loopStopId,
+          typeof body.reason === "string" ? body.reason : "stopped_by_user"
+        );
+        sendJson(response, 200, { ok: true, result });
+      } catch (error) {
+        sendJson(response, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const loopId = loopApiMatch(url.pathname);
+
+    if (request.method === "GET" && loopId) {
+      try {
+        sendJson(response, 200, {
+          ok: true,
+          result: await getLoopStatus(loopId),
+        });
+      } catch (error) {
+        sendJson(response, 404, { ok: false, error: error.message });
+      }
       return;
     }
 
@@ -294,6 +419,7 @@ export function startHttpServer() {
 
     console.log(`Health: http://${HOST}:${PORT}/health`);
     console.log(`Workspace API: http://${HOST}:${PORT}/api/workspaces`);
+    console.log(`Loop API: http://${HOST}:${PORT}/api/loops`);
   });
 
   return httpServer;
